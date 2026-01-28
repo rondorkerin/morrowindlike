@@ -133,7 +133,7 @@ export class Game {
     this.player.update(delta, (x, z) => this.world.getTerrainHeight(x, z));
 
     // Update NPCs
-    this.npcManager.update(delta, (x, z) => this.world.getTerrainHeight(x, z));
+    this.npcManager.update(delta);
 
     // Update rats and handle damage to player
     const ratResult = this.ratManager.update(

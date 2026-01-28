@@ -3,6 +3,7 @@ import { CharacterModel } from './CharacterModel';
 import { Sword } from './Sword';
 import { Inventory, ITEMS } from './Inventory';
 import { CharacterStats, WARRIOR_CLASS, AttributeName } from './Stats';
+import { CharacterMenu } from './CharacterMenu';
 
 export class Player {
   camera: THREE.PerspectiveCamera;
@@ -14,6 +15,7 @@ export class Player {
   sword: Sword;
   inventory: Inventory;
   stats: CharacterStats;
+  characterMenu: CharacterMenu;
 
   isThirdPerson = true;
 
@@ -92,6 +94,9 @@ export class Player {
 
     // Create inventory
     this.inventory = new Inventory();
+
+    // Create character menu
+    this.characterMenu = new CharacterMenu(this.stats, this.inventory);
 
     this.setupControls();
     this.createUI();
@@ -412,6 +417,7 @@ export class Player {
       // Just rest
       this.stats.rest(8);
       this.updateStatsUI();
+      this.characterMenu.update();
       this.showMessage('You rest for 8 hours.');
     }
   }
@@ -489,6 +495,7 @@ export class Player {
         this.stats.levelUp(selected as [AttributeName, AttributeName, AttributeName]);
         this.stats.rest(8);
         this.updateStatsUI();
+        this.characterMenu.update();
         ui.remove();
         this.showMessage(`You are now level ${this.stats.level}!`);
       }
@@ -594,13 +601,18 @@ export class Player {
       this.onAttackHit(attackPos, 2);
       this.attackHitThisSwing = true;
 
-      // Weapon skill progress
+      // Weapon skill progress (high for testing - 50 per hit means ~2 hits per skill point)
       const weaponSkill = this.inventory.getEquippedWeaponSkill();
-      this.stats.addSkillProgress(weaponSkill, 10);
+      this.stats.addSkillProgress(weaponSkill, 50);
     }
 
     // Update stats UI periodically
     this.updateStatsUI();
+
+    // Update character menu if open
+    if (this.characterMenu.isOpen) {
+      this.characterMenu.update();
+    }
 
     // Camera
     if (this.isThirdPerson) {
