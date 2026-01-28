@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { CharacterModel } from './CharacterModel';
 import { Sword } from './Sword';
 import { Inventory, ITEMS } from './Inventory';
-import { CharacterStats, WARRIOR_CLASS, AttributeName } from './Stats';
+import { CharacterStats, WARRIOR_CLASS, ClassDefinition, AttributeName } from './Stats';
 import { CharacterMenu } from './CharacterMenu';
 
 export class Player {
@@ -68,7 +68,7 @@ export class Player {
   nearBed = false;
   bedPosition: THREE.Vector3 | null = null;
 
-  constructor() {
+  constructor(classDef: ClassDefinition = WARRIOR_CLASS) {
     this.camera = new THREE.PerspectiveCamera(
       75,
       window.innerWidth / window.innerHeight,
@@ -76,8 +76,8 @@ export class Player {
       1000
     );
 
-    // Create stats with Warrior class
-    this.stats = new CharacterStats(WARRIOR_CLASS);
+    // Create stats with chosen class
+    this.stats = new CharacterStats(classDef);
 
     // Create player character model
     this.model = new CharacterModel({
@@ -189,7 +189,7 @@ export class Player {
           border: 1px solid #8B7355;
         }
       </style>
-      <div class="title">Warrior - Level <span id="player-level">1</span></div>
+      <div class="title">${this.stats.class.name} - Level <span id="player-level">1</span></div>
       <div class="bar">
         <div class="bar-label"><span>Health</span><span id="health-text">0/0</span></div>
         <div class="bar-bg"><div class="bar-fill health-fill" id="health-bar"></div></div>

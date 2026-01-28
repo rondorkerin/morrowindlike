@@ -72,6 +72,22 @@ export const WARRIOR_CLASS: ClassDefinition = {
   minorSkills: ['armorer', 'bluntWeapon', 'axe', 'spear', 'marksman'],
 };
 
+export const MAGE_CLASS: ClassDefinition = {
+  name: 'Mage',
+  specialization: 'magic',
+  favoredAttributes: ['intelligence', 'willpower'],
+  majorSkills: ['destruction', 'restoration', 'mysticism', 'alteration', 'conjuration'],
+  minorSkills: ['enchant', 'alchemy', 'illusion', 'unarmored'],
+};
+
+export const ARCHER_CLASS: ClassDefinition = {
+  name: 'Archer',
+  specialization: 'stealth',
+  favoredAttributes: ['agility', 'speed'],
+  majorSkills: ['marksman', 'sneak', 'lightArmor', 'athletics', 'acrobatics'],
+  minorSkills: ['shortBlade', 'security', 'mercantile', 'handToHand'],
+};
+
 export class CharacterStats {
   // Base attributes (before bonuses)
   attributes: Record<AttributeName, number> = {

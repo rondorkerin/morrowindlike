@@ -141,9 +141,9 @@ export class World {
   }
 
   createBed() {
-    // Place a bed near spawn for sleeping/leveling
-    const bedX = 5;
-    const bedZ = 10;
+    // Place a bed outside the cave entrance
+    const bedX = 10;
+    const bedZ = -6;
     const bedY = this.getTerrainHeight(bedX, bedZ);
 
     // Bed frame
@@ -180,7 +180,7 @@ export class World {
   }
 
   getBedPosition(): THREE.Vector3 {
-    return new THREE.Vector3(5, this.getTerrainHeight(5, 10), 10);
+    return new THREE.Vector3(10, this.getTerrainHeight(10, -6), -6);
   }
 
   createAmbience() {
