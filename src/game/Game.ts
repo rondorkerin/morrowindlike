@@ -30,14 +30,23 @@ export class Game {
     // Create world
     this.world = new World(this.scene);
 
-    // Create player
+    // Create player and place on terrain
     this.player = new Player();
+    const startX = 0;
+    const startZ = 5;
+    const startY = this.world.getTerrainHeight(startX, startZ);
+    this.player.position.set(startX, startY, startZ);
+    this.player.model.setPosition(startX, startY, startZ);
+    this.player.initializeCamera();
     this.scene.add(this.player.group);
 
     // Setup player attack callback
     this.player.onAttackHit = (position, range) => {
       this.handlePlayerAttack(position, range);
     };
+
+    // Wire up bed position for sleeping/leveling
+    this.player.bedPosition = this.world.getBedPosition();
 
     // Create NPCs
     this.npcManager = new NPCManager(this.scene);

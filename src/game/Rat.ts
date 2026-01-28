@@ -13,6 +13,10 @@ export class Rat {
   isAggro = false;
   isDead = false;
 
+  // Smooth ground following
+  currentGroundY = 0;
+  groundLerpSpeed = 10;
+
   // Animation
   walkCycle = 0;
   body: THREE.Mesh;
@@ -111,6 +115,7 @@ export class Rat {
     }
 
     this.group.position.copy(position);
+    this.currentGroundY = position.y;
   }
 
   update(
@@ -159,8 +164,10 @@ export class Rat {
       }
     }
 
-    // Stick to terrain
-    this.position.y = getTerrainHeight(this.position.x, this.position.z);
+    // Smooth ground following
+    const targetY = getTerrainHeight(this.position.x, this.position.z);
+    this.currentGroundY += (targetY - this.currentGroundY) * this.groundLerpSpeed * delta;
+    this.position.y = this.currentGroundY;
     this.group.position.copy(this.position);
 
     return { attacked, damage: damageDealt };

@@ -5,38 +5,35 @@ export class World {
   terrain!: THREE.Mesh;
   terrainSize = 200;
   terrainSegments = 100;
-  heightData: Float32Array;
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
-    this.heightData = new Float32Array((this.terrainSegments + 1) ** 2);
 
     this.createSky();
     this.createTerrain();
     this.createWater();
     this.createTrees();
     this.createRocks();
+    this.createBed();
     this.createAmbience();
   }
 
-  // Deterministic noise function
-  noise(x: number, z: number): number {
-    const n = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
-    return n - Math.floor(n);
-  }
+  // Smooth terrain height - no high-frequency noise
+  getTerrainHeight(x: number, z: number): number {
+    const halfSize = this.terrainSize / 2;
+    const clampedX = Math.max(-halfSize, Math.min(halfSize, x));
+    const clampedZ = Math.max(-halfSize, Math.min(halfSize, z));
 
-  // Calculate height at any world position (deterministic)
-  calculateHeight(x: number, z: number): number {
+    // Smooth rolling hills only - no noise
     let height = 0;
-    height += Math.sin(x * 0.02) * Math.cos(z * 0.02) * 5;
-    height += Math.sin(x * 0.05 + 1) * Math.cos(z * 0.05 + 2) * 2;
-    height += Math.sin(x * 0.1 + 3) * Math.cos(z * 0.1 + 4) * 1;
-    height += (this.noise(x * 0.5, z * 0.5) - 0.5) * 0.5;
+    height += Math.sin(clampedX * 0.02) * Math.cos(clampedZ * 0.02) * 5;
+    height += Math.sin(clampedX * 0.05 + 1) * Math.cos(clampedZ * 0.05 + 2) * 2;
+    height += Math.sin(clampedX * 0.1 + 3) * Math.cos(clampedZ * 0.1 + 4) * 1;
+
     return height;
   }
 
   createSky() {
-    // Bright blue sky
     this.scene.background = new THREE.Color(0x87ceeb);
     this.scene.fog = new THREE.Fog(0x87ceeb, 80, 200);
   }
@@ -51,26 +48,16 @@ export class World {
 
     const vertices = geometry.attributes.position.array as Float32Array;
 
-    // Build height data grid
-    for (let iz = 0; iz <= this.terrainSegments; iz++) {
-      for (let ix = 0; ix <= this.terrainSegments; ix++) {
-        const worldX = (ix / this.terrainSegments - 0.5) * this.terrainSize;
-        const worldZ = (iz / this.terrainSegments - 0.5) * this.terrainSize;
-        const height = this.calculateHeight(worldX, worldZ);
-        this.heightData[iz * (this.terrainSegments + 1) + ix] = height;
-      }
-    }
-
-    // Apply heights to mesh vertices
     for (let i = 0; i < vertices.length; i += 3) {
-      const x = vertices[i];
-      const y = vertices[i + 1];
-      vertices[i + 2] = this.calculateHeight(x, y);
+      const planeX = vertices[i];
+      const planeY = vertices[i + 1];
+      const worldX = planeX;
+      const worldZ = -planeY;
+      vertices[i + 2] = this.getTerrainHeight(worldX, worldZ);
     }
 
     geometry.computeVertexNormals();
 
-    // Green grass terrain
     const material = new THREE.MeshStandardMaterial({
       color: 0x4a7c3f,
       roughness: 0.8,
@@ -103,13 +90,14 @@ export class World {
   createTrees() {
     const trunkGeometry = new THREE.CylinderGeometry(0.2, 0.3, 3, 6);
     const trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
-
     const canopyGeometry = new THREE.ConeGeometry(1.5, 4, 6);
     const canopyMaterial = new THREE.MeshStandardMaterial({ color: 0x228B22 });
 
     for (let i = 0; i < 50; i++) {
-      const x = (this.noise(i * 0.1, i * 0.2) - 0.5) * this.terrainSize * 0.8;
-      const z = (this.noise(i * 0.3, i * 0.4) - 0.5) * this.terrainSize * 0.8;
+      const angle = i * 0.618033 * Math.PI * 2;
+      const radius = 10 + (i * 3) % 80;
+      const x = Math.cos(angle) * radius;
+      const z = Math.sin(angle) * radius;
       const y = this.getTerrainHeight(x, z);
 
       if (y > 0) {
@@ -135,27 +123,67 @@ export class World {
     });
 
     for (let i = 0; i < 30; i++) {
-      const x = (this.noise(i * 0.5, i * 0.6) - 0.5) * this.terrainSize * 0.8;
-      const z = (this.noise(i * 0.7, i * 0.8) - 0.5) * this.terrainSize * 0.8;
+      const angle = i * 0.753 * Math.PI * 2;
+      const radius = 5 + (i * 4) % 70;
+      const x = Math.cos(angle) * radius;
+      const z = Math.sin(angle) * radius;
       const y = this.getTerrainHeight(x, z);
 
       const rock = new THREE.Mesh(rockGeometry, rockMaterial);
-      const scale = 0.5 + this.noise(i, i) * 1.5;
+      const scale = 0.5 + (i % 5) * 0.3;
       rock.scale.set(scale, scale * 0.6, scale);
       rock.position.set(x, y + scale * 0.3, z);
-      rock.rotation.set(
-        this.noise(i * 1.1, 0) * Math.PI,
-        this.noise(i * 1.2, 0) * Math.PI,
-        this.noise(i * 1.3, 0) * Math.PI
-      );
+      rock.rotation.set(i * 0.5, i * 0.7, i * 0.3);
       rock.castShadow = true;
       rock.receiveShadow = true;
       this.scene.add(rock);
     }
   }
 
+  createBed() {
+    // Place a bed near spawn for sleeping/leveling
+    const bedX = 5;
+    const bedZ = 10;
+    const bedY = this.getTerrainHeight(bedX, bedZ);
+
+    // Bed frame
+    const frameMat = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
+    const frameGeo = new THREE.BoxGeometry(1.2, 0.3, 2.2);
+    const frame = new THREE.Mesh(frameGeo, frameMat);
+    frame.position.set(bedX, bedY + 0.15, bedZ);
+    frame.castShadow = true;
+    this.scene.add(frame);
+
+    // Mattress
+    const mattressMat = new THREE.MeshStandardMaterial({ color: 0xF5DEB3 });
+    const mattressGeo = new THREE.BoxGeometry(1, 0.2, 2);
+    const mattress = new THREE.Mesh(mattressGeo, mattressMat);
+    mattress.position.set(bedX, bedY + 0.4, bedZ);
+    mattress.castShadow = true;
+    this.scene.add(mattress);
+
+    // Pillow
+    const pillowMat = new THREE.MeshStandardMaterial({ color: 0xFFFFFF });
+    const pillowGeo = new THREE.BoxGeometry(0.8, 0.15, 0.4);
+    const pillow = new THREE.Mesh(pillowGeo, pillowMat);
+    pillow.position.set(bedX, bedY + 0.55, bedZ - 0.7);
+    pillow.castShadow = true;
+    this.scene.add(pillow);
+
+    // Blanket
+    const blanketMat = new THREE.MeshStandardMaterial({ color: 0x8B0000 });
+    const blanketGeo = new THREE.BoxGeometry(1.1, 0.08, 1.4);
+    const blanket = new THREE.Mesh(blanketGeo, blanketMat);
+    blanket.position.set(bedX, bedY + 0.52, bedZ + 0.2);
+    blanket.castShadow = true;
+    this.scene.add(blanket);
+  }
+
+  getBedPosition(): THREE.Vector3 {
+    return new THREE.Vector3(5, this.getTerrainHeight(5, 10), 10);
+  }
+
   createAmbience() {
-    // Bright sun
     const sunLight = new THREE.DirectionalLight(0xffffff, 1.5);
     sunLight.position.set(50, 100, 50);
     sunLight.castShadow = true;
@@ -169,43 +197,10 @@ export class World {
     sunLight.shadow.camera.bottom = -100;
     this.scene.add(sunLight);
 
-    // Brighter ambient
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
     this.scene.add(ambientLight);
 
-    // Hemisphere light - blue sky, green ground
     const hemiLight = new THREE.HemisphereLight(0x87ceeb, 0x4a7c3f, 0.4);
     this.scene.add(hemiLight);
-  }
-
-  getTerrainHeight(x: number, z: number): number {
-    const halfSize = this.terrainSize / 2;
-
-    const clampedX = Math.max(-halfSize, Math.min(halfSize, x));
-    const clampedZ = Math.max(-halfSize, Math.min(halfSize, z));
-
-    const normalizedX = (clampedX + halfSize) / this.terrainSize;
-    const normalizedZ = (clampedZ + halfSize) / this.terrainSize;
-
-    const ix = normalizedX * this.terrainSegments;
-    const iz = normalizedZ * this.terrainSegments;
-
-    const x0 = Math.max(0, Math.min(this.terrainSegments - 1, Math.floor(ix)));
-    const z0 = Math.max(0, Math.min(this.terrainSegments - 1, Math.floor(iz)));
-    const x1 = Math.min(x0 + 1, this.terrainSegments);
-    const z1 = Math.min(z0 + 1, this.terrainSegments);
-
-    const fx = ix - x0;
-    const fz = iz - z0;
-
-    const h00 = this.heightData[z0 * (this.terrainSegments + 1) + x0];
-    const h10 = this.heightData[z0 * (this.terrainSegments + 1) + x1];
-    const h01 = this.heightData[z1 * (this.terrainSegments + 1) + x0];
-    const h11 = this.heightData[z1 * (this.terrainSegments + 1) + x1];
-
-    const h0 = h00 * (1 - fx) + h10 * fx;
-    const h1 = h01 * (1 - fx) + h11 * fx;
-
-    return h0 * (1 - fz) + h1 * fz;
   }
 }

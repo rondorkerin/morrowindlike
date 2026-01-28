@@ -11,6 +11,10 @@ export class NPC {
   homePosition: THREE.Vector3;
   getTerrainHeight: (x: number, z: number) => number;
 
+  // Smooth ground following
+  currentGroundY = 0;
+  groundLerpSpeed = 10;
+
   constructor(
     model: CharacterModel,
     startPosition: THREE.Vector3,
@@ -20,9 +24,9 @@ export class NPC {
     this.model = model;
     this.getTerrainHeight = getTerrainHeight;
 
-    // Get proper ground height at start position
     const groundY = getTerrainHeight(startPosition.x, startPosition.z);
     this.position = new THREE.Vector3(startPosition.x, groundY, startPosition.z);
+    this.currentGroundY = groundY;
     this.homePosition = this.position.clone();
     this.targetPosition = this.position.clone();
     this.wanderRadius = wanderRadius;
@@ -44,20 +48,22 @@ export class NPC {
   }
 
   update(delta: number) {
+    // Get current terrain height
+    const targetY = this.getTerrainHeight(this.position.x, this.position.z);
+
+    // Smooth interpolation to terrain
+    this.currentGroundY += (targetY - this.currentGroundY) * this.groundLerpSpeed * delta;
+    this.position.y = this.currentGroundY;
+
     if (this.waitTime > 0) {
       this.waitTime -= delta;
       this.model.update(delta, false, false);
-
-      // Keep on ground even when waiting
-      this.position.y = this.getTerrainHeight(this.position.x, this.position.z);
       this.model.setPosition(this.position.x, this.position.y, this.position.z);
       return;
     }
 
-    const direction = new THREE.Vector3()
-      .subVectors(this.targetPosition, this.position);
+    const direction = new THREE.Vector3().subVectors(this.targetPosition, this.position);
     direction.y = 0;
-
     const distance = direction.length();
 
     if (distance < 0.5) {
@@ -67,14 +73,9 @@ export class NPC {
 
     direction.normalize();
 
-    // Move
     this.position.x += direction.x * this.speed * delta;
     this.position.z += direction.z * this.speed * delta;
 
-    // Always stick to terrain
-    this.position.y = this.getTerrainHeight(this.position.x, this.position.z);
-
-    // Face movement direction
     const angle = Math.atan2(direction.x, direction.z);
     this.model.setRotation(angle);
 
@@ -92,10 +93,11 @@ export class NPCManager {
   }
 
   spawnNPCs(getTerrainHeight: (x: number, z: number) => number) {
-    // Spawn some villagers
     for (let i = 0; i < 5; i++) {
-      const x = (Math.random() - 0.5) * 60;
-      const z = (Math.random() - 0.5) * 60;
+      const angle = i * 0.618033 * Math.PI * 2;
+      const radius = 20 + i * 8;
+      const x = Math.cos(angle) * radius;
+      const z = Math.sin(angle) * radius;
       const y = getTerrainHeight(x, z);
 
       if (y > 0) {
@@ -106,10 +108,11 @@ export class NPCManager {
       }
     }
 
-    // Spawn some guards
     for (let i = 0; i < 3; i++) {
-      const x = (Math.random() - 0.5) * 40;
-      const z = (Math.random() - 0.5) * 40;
+      const angle = i * 0.753 * Math.PI * 2 + 0.5;
+      const radius = 15 + i * 6;
+      const x = Math.cos(angle) * radius;
+      const z = Math.sin(angle) * radius;
       const y = getTerrainHeight(x, z);
 
       if (y > 0) {
@@ -121,10 +124,11 @@ export class NPCManager {
       }
     }
 
-    // Spawn some Dunmer
     for (let i = 0; i < 4; i++) {
-      const x = (Math.random() - 0.5) * 80;
-      const z = (Math.random() - 0.5) * 80;
+      const angle = i * 0.9 * Math.PI * 2 + 1;
+      const radius = 30 + i * 10;
+      const x = Math.cos(angle) * radius;
+      const z = Math.sin(angle) * radius;
       const y = getTerrainHeight(x, z);
 
       if (y > 0) {
@@ -136,7 +140,7 @@ export class NPCManager {
     }
   }
 
-  update(delta: number, getTerrainHeight: (x: number, z: number) => number) {
+  update(delta: number) {
     for (const npc of this.npcs) {
       npc.update(delta);
     }

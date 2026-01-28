@@ -1,55 +1,70 @@
 import * as THREE from 'three';
 import { CharacterModel } from './CharacterModel';
 import { Sword } from './Sword';
-import { Inventory } from './Inventory';
+import { Inventory, ITEMS } from './Inventory';
+import { CharacterStats, WARRIOR_CLASS, AttributeName } from './Stats';
 
 export class Player {
   camera: THREE.PerspectiveCamera;
   velocity: THREE.Vector3 = new THREE.Vector3();
-  direction: THREE.Vector3 = new THREE.Vector3();
   position: THREE.Vector3 = new THREE.Vector3(0, 0, 5);
 
-  // Character model for third person
+  // Character systems
   model: CharacterModel;
   sword: Sword;
   inventory: Inventory;
+  stats: CharacterStats;
+
   isThirdPerson = true;
 
   // Movement state
   moveForward = false;
   moveBackward = false;
-  moveLeft = false;
-  moveRight = false;
+  rotateLeft = false;
+  rotateRight = false;
   isRunning = false;
+
+  // Character facing
+  characterYaw = 0;
+  rotateSpeed = 3;
+
+  // Camera orbit
+  cameraYaw = 0;
+  cameraPitch = 0.3;
+  isRightMouseDown = false;
+  mouseSensitivity = 0.003;
+
+  // Camera settings
+  cameraDistance = 6;
+  cameraHeight = 2.5;
+  cameraLerpSpeed = 8;
+  currentCameraPos = new THREE.Vector3();
+
+  // Smooth ground following
+  targetGroundY = 0;
+  currentGroundY = 0;
+  groundLerpSpeed = 15;
 
   // Jumping
   verticalVelocity = 0;
   isGrounded = true;
-  jumpForce = 12;
-  gravity = 30;
+  jumpForce = 10;
+  gravity = 25;
 
   // Combat
-  health = 100;
-  maxHealth = 100;
-  isAttacking = false;
   attackHitThisSwing = false;
 
   // Settings
-  walkSpeed = 8;
-  runSpeed = 16;
   height = 1.7;
-
-  // Camera control - yaw is the horizontal angle we're FACING
-  yaw = 0;
-  pitch = 0;
-  mouseSensitivity = 0.002;
-  thirdPersonDistance = 5;
-  thirdPersonHeight = 2;
 
   isLocked = false;
 
   // Callbacks
   onAttackHit?: (position: THREE.Vector3, range: number) => void;
+
+  // Bed interaction
+  nearBed = false;
+  bedPosition: THREE.Vector3 | null = null;
 
   constructor() {
     this.camera = new THREE.PerspectiveCamera(
@@ -58,6 +73,9 @@ export class Player {
       0.1,
       1000
     );
+
+    // Create stats with Warrior class
+    this.stats = new CharacterStats(WARRIOR_CLASS);
 
     // Create player character model
     this.model = new CharacterModel({
@@ -76,56 +94,172 @@ export class Player {
     this.inventory = new Inventory();
 
     this.setupControls();
-    this.createHealthBar();
-  }
-
-  createHealthBar() {
-    const healthBar = document.createElement('div');
-    healthBar.id = 'health-bar';
-    healthBar.innerHTML = `
-      <style>
-        #health-bar {
-          position: fixed;
-          top: 60px;
-          left: 20px;
-          width: 200px;
-          pointer-events: none;
-        }
-        #health-bar .bar-bg {
-          background: rgba(0,0,0,0.5);
-          border: 1px solid #5a4a3a;
-          height: 20px;
-          width: 100%;
-        }
-        #health-bar .bar-fill {
-          background: linear-gradient(to right, #8b0000, #cc0000);
-          height: 100%;
-          transition: width 0.2s;
-        }
-        #health-bar .label {
-          color: #222;
-          font-family: 'Georgia', serif;
-          font-size: 12px;
-          text-shadow: 1px 1px 2px rgba(255,255,255,0.5);
-        }
-      </style>
-      <div class="label">Health</div>
-      <div class="bar-bg">
-        <div class="bar-fill" style="width: 100%"></div>
-      </div>
-    `;
-    document.body.appendChild(healthBar);
-  }
-
-  updateHealthBar() {
-    const fill = document.querySelector('#health-bar .bar-fill') as HTMLElement;
-    if (fill) {
-      fill.style.width = `${(this.health / this.maxHealth) * 100}%`;
-    }
+    this.createUI();
   }
 
   get group(): THREE.Group {
     return this.model.group;
+  }
+
+  get walkSpeed(): number {
+    // Speed based on Athletics skill and Speed attribute
+    const base = 6;
+    const speedBonus = this.stats.attributes.speed / 50;
+    const athleticsBonus = this.stats.skills.athletics / 100;
+    return base * (1 + speedBonus) * (1 + athleticsBonus * 0.5);
+  }
+
+  get runSpeed(): number {
+    return this.walkSpeed * 1.8;
+  }
+
+  createUI() {
+    // Stats display
+    const statsUI = document.createElement('div');
+    statsUI.id = 'stats-ui';
+    statsUI.innerHTML = `
+      <style>
+        #stats-ui {
+          position: fixed;
+          top: 20px;
+          right: 20px;
+          color: #D4C4A8;
+          font-family: 'Georgia', serif;
+          font-size: 12px;
+          background: rgba(0,0,0,0.6);
+          padding: 10px 15px;
+          border: 1px solid #5a4a3a;
+          min-width: 150px;
+        }
+        #stats-ui .title {
+          color: #FFD700;
+          font-size: 14px;
+          margin-bottom: 8px;
+          border-bottom: 1px solid #5a4a3a;
+          padding-bottom: 5px;
+        }
+        #stats-ui .bar {
+          margin: 4px 0;
+        }
+        #stats-ui .bar-label {
+          display: flex;
+          justify-content: space-between;
+          font-size: 10px;
+        }
+        #stats-ui .bar-bg {
+          height: 8px;
+          background: rgba(0,0,0,0.5);
+          border: 1px solid #3a3a3a;
+        }
+        #stats-ui .bar-fill {
+          height: 100%;
+          transition: width 0.3s;
+        }
+        #stats-ui .health-fill { background: linear-gradient(to right, #8b0000, #cc0000); }
+        #stats-ui .magicka-fill { background: linear-gradient(to right, #000088, #0000cc); }
+        #stats-ui .fatigue-fill { background: linear-gradient(to right, #006600, #00aa00); }
+        #stats-ui .level-info {
+          margin-top: 8px;
+          font-size: 11px;
+          color: #888;
+        }
+        #stats-ui .can-level {
+          color: #FFD700;
+          animation: pulse 1s infinite;
+        }
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
+        }
+        #bed-prompt {
+          display: none;
+          position: fixed;
+          bottom: 100px;
+          left: 50%;
+          transform: translateX(-50%);
+          background: rgba(0,0,0,0.8);
+          color: #FFD700;
+          padding: 10px 20px;
+          font-family: 'Georgia', serif;
+          border: 1px solid #8B7355;
+        }
+      </style>
+      <div class="title">Warrior - Level <span id="player-level">1</span></div>
+      <div class="bar">
+        <div class="bar-label"><span>Health</span><span id="health-text">0/0</span></div>
+        <div class="bar-bg"><div class="bar-fill health-fill" id="health-bar"></div></div>
+      </div>
+      <div class="bar">
+        <div class="bar-label"><span>Magicka</span><span id="magicka-text">0/0</span></div>
+        <div class="bar-bg"><div class="bar-fill magicka-fill" id="magicka-bar"></div></div>
+      </div>
+      <div class="bar">
+        <div class="bar-label"><span>Fatigue</span><span id="fatigue-text">0/0</span></div>
+        <div class="bar-bg"><div class="bar-fill fatigue-fill" id="fatigue-bar"></div></div>
+      </div>
+      <div class="level-info" id="level-info">Skills: 0/10</div>
+    `;
+    document.body.appendChild(statsUI);
+
+    // Bed prompt
+    const bedPrompt = document.createElement('div');
+    bedPrompt.id = 'bed-prompt';
+    bedPrompt.textContent = 'Press E to Sleep';
+    document.body.appendChild(bedPrompt);
+
+    this.updateStatsUI();
+  }
+
+  updateStatsUI() {
+    const s = this.stats;
+
+    const levelEl = document.getElementById('player-level');
+    if (levelEl) levelEl.textContent = s.level.toString();
+
+    const healthBar = document.getElementById('health-bar') as HTMLElement;
+    const healthText = document.getElementById('health-text');
+    if (healthBar && healthText) {
+      healthBar.style.width = `${(s.health / s.maxHealth) * 100}%`;
+      healthText.textContent = `${Math.floor(s.health)}/${s.maxHealth}`;
+    }
+
+    const magickaBar = document.getElementById('magicka-bar') as HTMLElement;
+    const magickaText = document.getElementById('magicka-text');
+    if (magickaBar && magickaText) {
+      magickaBar.style.width = `${(s.magicka / s.maxMagicka) * 100}%`;
+      magickaText.textContent = `${Math.floor(s.magicka)}/${s.maxMagicka}`;
+    }
+
+    const fatigueBar = document.getElementById('fatigue-bar') as HTMLElement;
+    const fatigueText = document.getElementById('fatigue-text');
+    if (fatigueBar && fatigueText) {
+      fatigueBar.style.width = `${(s.fatigue / s.maxFatigue) * 100}%`;
+      fatigueText.textContent = `${Math.floor(s.fatigue)}/${s.maxFatigue}`;
+    }
+
+    const levelInfo = document.getElementById('level-info');
+    if (levelInfo) {
+      if (s.canLevelUp) {
+        levelInfo.className = 'level-info can-level';
+        levelInfo.textContent = 'LEVEL UP READY - Sleep to level up!';
+      } else {
+        levelInfo.className = 'level-info';
+        levelInfo.textContent = `Skills: ${s.skillIncreasesThisLevel}/${s.skillIncreasesNeeded}`;
+      }
+    }
+  }
+
+  initializeCamera() {
+    const totalYaw = this.characterYaw + this.cameraYaw;
+    this.currentCameraPos.set(
+      this.position.x - Math.sin(totalYaw) * this.cameraDistance,
+      this.position.y + this.cameraHeight,
+      this.position.z - Math.cos(totalYaw) * this.cameraDistance
+    );
+    this.currentGroundY = this.position.y;
+    this.targetGroundY = this.position.y;
+    this.camera.position.copy(this.currentCameraPos);
+    this.camera.lookAt(this.position.x, this.position.y + this.height, this.position.z);
   }
 
   setupControls() {
@@ -133,15 +267,15 @@ export class Player {
     document.addEventListener('keyup', (e) => this.onKeyUp(e));
     document.addEventListener('mousemove', (e) => this.onMouseMove(e));
     document.addEventListener('mousedown', (e) => this.onMouseDown(e));
+    document.addEventListener('mouseup', (e) => this.onMouseUp(e));
+    document.addEventListener('contextmenu', (e) => e.preventDefault());
 
-    // Toggle view mode with V
     document.addEventListener('keydown', (e) => {
       if (e.code === 'KeyV') {
         this.isThirdPerson = !this.isThirdPerson;
       }
     });
 
-    // Pointer lock
     const instructions = document.getElementById('instructions');
     instructions?.addEventListener('click', () => {
       document.body.requestPointerLock();
@@ -160,13 +294,20 @@ export class Player {
     switch (event.code) {
       case 'KeyW': this.moveForward = true; break;
       case 'KeyS': this.moveBackward = true; break;
-      case 'KeyA': this.moveLeft = true; break;
-      case 'KeyD': this.moveRight = true; break;
+      case 'KeyA': this.rotateLeft = true; break;
+      case 'KeyD': this.rotateRight = true; break;
       case 'ShiftLeft': this.isRunning = true; break;
       case 'Space':
         if (this.isGrounded) {
           this.verticalVelocity = this.jumpForce;
           this.isGrounded = false;
+          // Acrobatics skill progress
+          this.stats.addSkillProgress('acrobatics', 5);
+        }
+        break;
+      case 'KeyE':
+        if (this.nearBed) {
+          this.sleep();
         }
         break;
     }
@@ -176,8 +317,8 @@ export class Player {
     switch (event.code) {
       case 'KeyW': this.moveForward = false; break;
       case 'KeyS': this.moveBackward = false; break;
-      case 'KeyA': this.moveLeft = false; break;
-      case 'KeyD': this.moveRight = false; break;
+      case 'KeyA': this.rotateLeft = false; break;
+      case 'KeyD': this.rotateRight = false; break;
       case 'ShiftLeft': this.isRunning = false; break;
     }
   }
@@ -185,41 +326,60 @@ export class Player {
   onMouseMove(event: MouseEvent) {
     if (!this.isLocked) return;
 
-    this.yaw -= event.movementX * this.mouseSensitivity;
-    this.pitch -= event.movementY * this.mouseSensitivity;
-
-    // Clamp pitch
-    this.pitch = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, this.pitch));
+    if (this.isRightMouseDown) {
+      this.cameraYaw -= event.movementX * this.mouseSensitivity;
+      this.cameraPitch -= event.movementY * this.mouseSensitivity;
+      this.cameraPitch = Math.max(0.1, Math.min(1.2, this.cameraPitch));
+    }
   }
 
   onMouseDown(event: MouseEvent) {
     if (!this.isLocked) return;
+
     if (event.button === 0) {
       this.sword.swing();
       this.attackHitThisSwing = false;
+      // Drain fatigue on attack
+      this.stats.fatigue = Math.max(0, this.stats.fatigue - 5);
+      this.updateStatsUI();
+    } else if (event.button === 2) {
+      this.isRightMouseDown = true;
+    }
+  }
+
+  onMouseUp(event: MouseEvent) {
+    if (event.button === 2) {
+      if (this.isRightMouseDown) {
+        this.characterYaw += this.cameraYaw;
+        this.cameraYaw = 0;
+      }
+      this.isRightMouseDown = false;
     }
   }
 
   get isMoving(): boolean {
-    return this.moveForward || this.moveBackward || this.moveLeft || this.moveRight;
+    return this.moveForward || this.moveBackward;
   }
 
   takeDamage(amount: number) {
-    this.health = Math.max(0, this.health - amount);
-    this.updateHealthBar();
+    // Apply armor reduction
+    const armorRating = this.inventory.getTotalArmorRating();
+    const reduction = armorRating / (armorRating + 100);
+    const actualDamage = amount * (1 - reduction);
 
+    this.stats.health = Math.max(0, this.stats.health - actualDamage);
+    this.updateStatsUI();
+
+    // Flash red
     const flash = document.createElement('div');
     flash.style.cssText = `
-      position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(255, 0, 0, 0.3);
-      pointer-events: none;
-      z-index: 1000;
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(255, 0, 0, 0.3); pointer-events: none; z-index: 1000;
     `;
     document.body.appendChild(flash);
     setTimeout(() => flash.remove(), 100);
 
-    if (this.health <= 0) {
+    if (this.stats.health <= 0) {
       this.die();
     }
   }
@@ -229,154 +389,241 @@ export class Player {
     deathScreen.innerHTML = `
       <style>
         #death-screen {
-          position: fixed;
-          top: 0; left: 0; right: 0; bottom: 0;
+          position: fixed; top: 0; left: 0; right: 0; bottom: 0;
           background: rgba(0, 0, 0, 0.8);
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          z-index: 2000;
-          color: #8b0000;
-          font-family: 'Georgia', serif;
-          font-size: 48px;
+          display: flex; flex-direction: column; align-items: center; justify-content: center;
+          z-index: 2000; color: #8b0000; font-family: 'Georgia', serif; font-size: 48px;
         }
         #death-screen button {
-          margin-top: 30px;
-          padding: 15px 30px;
-          font-family: 'Georgia', serif;
-          font-size: 18px;
-          background: #3a2a1a;
-          color: #c9a86c;
-          border: 2px solid #5a4a3a;
-          cursor: pointer;
+          margin-top: 30px; padding: 15px 30px; font-family: 'Georgia', serif; font-size: 18px;
+          background: #3a2a1a; color: #c9a86c; border: 2px solid #5a4a3a; cursor: pointer;
         }
       </style>
-      <div id="death-screen">
-        <div>You Died</div>
-        <button onclick="location.reload()">Respawn</button>
-      </div>
+      <div id="death-screen"><div>You Died</div><button onclick="location.reload()">Respawn</button></div>
     `;
     document.body.appendChild(deathScreen);
     document.exitPointerLock();
   }
 
+  sleep() {
+    if (this.stats.canLevelUp) {
+      this.showLevelUpUI();
+    } else {
+      // Just rest
+      this.stats.rest(8);
+      this.updateStatsUI();
+      this.showMessage('You rest for 8 hours.');
+    }
+  }
+
+  showLevelUpUI() {
+    const ui = document.createElement('div');
+    ui.id = 'levelup-ui';
+    ui.innerHTML = `
+      <style>
+        #levelup-ui {
+          position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+          background: rgba(20, 15, 10, 0.95); border: 2px solid #FFD700;
+          color: #D4C4A8; font-family: 'Georgia', serif; padding: 20px;
+          z-index: 2000; min-width: 400px;
+        }
+        #levelup-ui h2 { color: #FFD700; margin: 0 0 15px 0; text-align: center; }
+        #levelup-ui p { margin: 10px 0; font-size: 14px; }
+        #levelup-ui .attrs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 15px 0; }
+        #levelup-ui .attr {
+          background: rgba(0,0,0,0.3); border: 1px solid #5a4a3a; padding: 10px;
+          cursor: pointer; text-align: center;
+        }
+        #levelup-ui .attr:hover { background: rgba(100,80,60,0.3); }
+        #levelup-ui .attr.selected { border-color: #FFD700; background: rgba(100,80,0,0.3); }
+        #levelup-ui .attr .mult { color: #00ff00; font-size: 12px; }
+        #levelup-ui button {
+          width: 100%; padding: 10px; margin-top: 15px;
+          background: #5a4a3a; border: 1px solid #8B7355; color: #D4C4A8;
+          font-family: 'Georgia', serif; font-size: 16px; cursor: pointer;
+        }
+        #levelup-ui button:disabled { opacity: 0.5; cursor: not-allowed; }
+      </style>
+      <h2>Level Up!</h2>
+      <p>Choose 3 attributes to increase:</p>
+      <div class="attrs" id="attr-choices"></div>
+      <p id="selected-count">Selected: 0/3</p>
+      <button id="confirm-levelup" disabled>Confirm Level Up</button>
+    `;
+    document.body.appendChild(ui);
+
+    const attrs: AttributeName[] = ['strength', 'intelligence', 'willpower', 'agility', 'speed', 'endurance', 'personality', 'luck'];
+    const selected: AttributeName[] = [];
+
+    const attrsEl = ui.querySelector('#attr-choices')!;
+    attrsEl.innerHTML = attrs.map(attr => {
+      const mult = this.stats.getAttributeMultiplier(attr);
+      const current = this.stats.attributes[attr];
+      return `
+        <div class="attr" data-attr="${attr}">
+          <div>${attr.charAt(0).toUpperCase() + attr.slice(1)}</div>
+          <div>Current: ${current}</div>
+          <div class="mult">+${mult}</div>
+        </div>
+      `;
+    }).join('');
+
+    attrsEl.querySelectorAll('.attr').forEach(el => {
+      el.addEventListener('click', () => {
+        const attr = (el as HTMLElement).dataset.attr as AttributeName;
+        const idx = selected.indexOf(attr);
+        if (idx >= 0) {
+          selected.splice(idx, 1);
+          el.classList.remove('selected');
+        } else if (selected.length < 3) {
+          selected.push(attr);
+          el.classList.add('selected');
+        }
+        ui.querySelector('#selected-count')!.textContent = `Selected: ${selected.length}/3`;
+        (ui.querySelector('#confirm-levelup') as HTMLButtonElement).disabled = selected.length !== 3;
+      });
+    });
+
+    ui.querySelector('#confirm-levelup')?.addEventListener('click', () => {
+      if (selected.length === 3) {
+        this.stats.levelUp(selected as [AttributeName, AttributeName, AttributeName]);
+        this.stats.rest(8);
+        this.updateStatsUI();
+        ui.remove();
+        this.showMessage(`You are now level ${this.stats.level}!`);
+      }
+    });
+  }
+
+  showMessage(text: string) {
+    const msg = document.createElement('div');
+    msg.style.cssText = `
+      position: fixed; top: 30%; left: 50%; transform: translateX(-50%);
+      background: rgba(0,0,0,0.8); color: #FFD700; padding: 15px 30px;
+      font-family: 'Georgia', serif; font-size: 18px; z-index: 1500;
+      border: 1px solid #8B7355;
+    `;
+    msg.textContent = text;
+    document.body.appendChild(msg);
+    setTimeout(() => msg.remove(), 2000);
+  }
+
   update(delta: number, getTerrainHeight: (x: number, z: number) => number) {
-    if (!this.isLocked || this.health <= 0) return;
+    if (!this.isLocked || this.stats.health <= 0) return;
 
     const speed = this.isRunning ? this.runSpeed : this.walkSpeed;
 
-    // Movement is relative to camera yaw (where we're looking)
-    // W = forward (negative Z in camera space)
-    // S = backward (positive Z)
-    // A = left (negative X)
-    // D = right (positive X)
+    // Rotate character
+    if (this.rotateLeft) this.characterYaw += this.rotateSpeed * delta;
+    if (this.rotateRight) this.characterYaw -= this.rotateSpeed * delta;
 
-    let moveX = 0;
-    let moveZ = 0;
+    // Movement
+    let moveSpeed = 0;
+    if (this.moveForward) moveSpeed = speed;
+    if (this.moveBackward) moveSpeed = -speed * 0.6;
 
-    if (this.moveForward) moveZ -= 1;
-    if (this.moveBackward) moveZ += 1;
-    if (this.moveLeft) moveX -= 1;
-    if (this.moveRight) moveX += 1;
+    const effectiveYaw = this.characterYaw + this.cameraYaw;
+    this.velocity.x = Math.sin(effectiveYaw) * moveSpeed;
+    this.velocity.z = Math.cos(effectiveYaw) * moveSpeed;
 
-    // Normalize diagonal movement
-    const length = Math.sqrt(moveX * moveX + moveZ * moveZ);
-    if (length > 0) {
-      moveX /= length;
-      moveZ /= length;
+    // Apply gravity only when not grounded
+    if (!this.isGrounded) {
+      this.verticalVelocity -= this.gravity * delta;
     }
 
-    // Rotate movement by camera yaw
-    // yaw = 0 means looking down negative Z
-    // We want W to move in the direction we're looking
-    const sinYaw = Math.sin(this.yaw);
-    const cosYaw = Math.cos(this.yaw);
-
-    // Transform local movement to world space
-    const worldMoveX = moveX * cosYaw - moveZ * sinYaw;
-    const worldMoveZ = moveX * sinYaw + moveZ * cosYaw;
-
-    // Update velocity
-    this.velocity.x = worldMoveX * speed;
-    this.velocity.z = worldMoveZ * speed;
-
-    // Apply gravity
-    this.verticalVelocity -= this.gravity * delta;
-
-    // Move player position
+    // Move horizontally
     this.position.x += this.velocity.x * delta;
     this.position.z += this.velocity.z * delta;
-    this.position.y += this.verticalVelocity * delta;
 
-    // Ground collision
-    const terrainY = getTerrainHeight(this.position.x, this.position.z);
-    if (this.position.y <= terrainY) {
-      this.position.y = terrainY;
-      this.verticalVelocity = 0;
-      this.isGrounded = true;
+    // Get terrain height at new position
+    this.targetGroundY = getTerrainHeight(this.position.x, this.position.z);
+
+    // Smooth ground following when grounded
+    if (this.isGrounded) {
+      // Smoothly interpolate to terrain height
+      this.currentGroundY += (this.targetGroundY - this.currentGroundY) * this.groundLerpSpeed * delta;
+      this.position.y = this.currentGroundY;
     } else {
-      this.isGrounded = false;
+      // In air - apply vertical velocity
+      this.position.y += this.verticalVelocity * delta;
+
+      // Check for landing
+      if (this.position.y <= this.targetGroundY) {
+        this.position.y = this.targetGroundY;
+        this.currentGroundY = this.targetGroundY;
+        this.verticalVelocity = 0;
+        this.isGrounded = true;
+      }
     }
 
-    // Update character model position
-    this.model.setPosition(this.position.x, this.position.y, this.position.z);
-
-    // Character faces the direction of movement OR camera direction
+    // Athletics skill progress while moving
     if (this.isMoving) {
-      // Face movement direction
-      const faceAngle = Math.atan2(worldMoveX, worldMoveZ);
-      this.model.setRotation(faceAngle);
-    } else {
-      // When standing still, face camera direction
-      this.model.setRotation(this.yaw);
+      this.stats.addSkillProgress('athletics', delta * 2);
+      // Drain fatigue while running
+      if (this.isRunning) {
+        this.stats.fatigue = Math.max(0, this.stats.fatigue - delta * 5);
+      }
     }
 
-    // Animate character
+    // Regenerate fatigue slowly
+    this.stats.fatigue = Math.min(this.stats.maxFatigue, this.stats.fatigue + delta * 2);
+
+    // Check bed proximity
+    if (this.bedPosition) {
+      const distToBed = this.position.distanceTo(this.bedPosition);
+      this.nearBed = distToBed < 3;
+      const bedPrompt = document.getElementById('bed-prompt');
+      if (bedPrompt) {
+        bedPrompt.style.display = this.nearBed ? 'block' : 'none';
+      }
+    }
+
+    // Update model
+    this.model.setPosition(this.position.x, this.position.y, this.position.z);
+    this.model.setRotation(effectiveYaw);
     this.model.update(delta, this.isMoving, this.isRunning);
 
-    // Update sword and check for hit
+    // Sword hit detection
     const hitFrame = this.sword.update(delta);
     if (hitFrame && !this.attackHitThisSwing && this.onAttackHit) {
       const attackPos = new THREE.Vector3(
-        this.position.x + Math.sin(this.model.group.rotation.y) * 1.5,
+        this.position.x + Math.sin(effectiveYaw) * 1.5,
         this.position.y + 1,
-        this.position.z + Math.cos(this.model.group.rotation.y) * 1.5
+        this.position.z + Math.cos(effectiveYaw) * 1.5
       );
       this.onAttackHit(attackPos, 2);
       this.attackHitThisSwing = true;
+
+      // Weapon skill progress
+      const weaponSkill = this.inventory.getEquippedWeaponSkill();
+      this.stats.addSkillProgress(weaponSkill, 10);
     }
 
-    // Update camera
+    // Update stats UI periodically
+    this.updateStatsUI();
+
+    // Camera
     if (this.isThirdPerson) {
-      // Camera orbits around player based on yaw
-      const camX = this.position.x - Math.sin(this.yaw) * this.thirdPersonDistance;
-      const camZ = this.position.z - Math.cos(this.yaw) * this.thirdPersonDistance;
-      const camY = this.position.y + this.thirdPersonHeight - this.pitch * 2;
+      const totalYaw = this.characterYaw + this.cameraYaw;
+      const targetCamX = this.position.x - Math.sin(totalYaw) * this.cameraDistance * Math.cos(this.cameraPitch);
+      const targetCamZ = this.position.z - Math.cos(totalYaw) * this.cameraDistance * Math.cos(this.cameraPitch);
+      const targetCamY = this.position.y + this.cameraHeight + Math.sin(this.cameraPitch) * this.cameraDistance;
 
-      this.camera.position.set(camX, camY, camZ);
-      this.camera.lookAt(
-        this.position.x,
-        this.position.y + this.height,
-        this.position.z
-      );
+      this.currentCameraPos.x += (targetCamX - this.currentCameraPos.x) * this.cameraLerpSpeed * delta;
+      this.currentCameraPos.y += (targetCamY - this.currentCameraPos.y) * this.cameraLerpSpeed * delta;
+      this.currentCameraPos.z += (targetCamZ - this.currentCameraPos.z) * this.cameraLerpSpeed * delta;
 
+      this.camera.position.copy(this.currentCameraPos);
+      this.camera.lookAt(this.position.x, this.position.y + this.height, this.position.z);
       this.model.group.visible = true;
     } else {
-      // First person - camera at eye level
-      this.camera.position.set(
-        this.position.x,
-        this.position.y + this.height,
-        this.position.z
-      );
-
-      // Look in yaw/pitch direction
+      this.camera.position.set(this.position.x, this.position.y + this.height, this.position.z);
       const lookDist = 10;
-      const lookX = this.position.x + Math.sin(this.yaw) * lookDist * Math.cos(this.pitch);
-      const lookZ = this.position.z + Math.cos(this.yaw) * lookDist * Math.cos(this.pitch);
-      const lookY = this.position.y + this.height + Math.sin(this.pitch) * lookDist;
-
-      this.camera.lookAt(lookX, lookY, lookZ);
+      this.camera.lookAt(
+        this.position.x + Math.sin(this.characterYaw) * lookDist,
+        this.position.y + this.height,
+        this.position.z + Math.cos(this.characterYaw) * lookDist
+      );
       this.model.group.visible = false;
     }
   }
